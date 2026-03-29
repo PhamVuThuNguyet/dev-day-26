@@ -3,7 +3,9 @@ import {
   ASSET_PATHS,
   GAME_CONSTANTS,
   GAME_HEIGHT,
+  GAME_LAYOUT,
   GAME_WIDTH,
+  HUD_STYLE,
   GameStatus,
   getBossSpeedMultiplier,
   getTurretFireRateMultiplier,
@@ -21,23 +23,24 @@ export class MainScene extends Phaser.Scene {
   private boss!: Phaser.Types.Physics.Arcade.SpriteWithDynamicBody;
   private player!: Phaser.Types.Physics.Arcade.SpriteWithDynamicBody;
   private bullets!: Phaser.Physics.Arcade.Group;
-  private turrets!: Phaser.GameObjects.Image[];
+  private turrets!: { sprite: Phaser.GameObjects.Image; bulletKey: string }[];
 
   private bossHp = GAME_CONSTANTS.initialBossHp;
   private playerLives = GAME_CONSTANTS.playerLives;
   private timeLeft = GAME_CONSTANTS.playTimeSeconds;
 
   private lastPlayerShotAt = -Infinity;
+  private isPlayerShooting = false;
+  private playerShotFiredThisAnim = false;
   private gameState: GameStatus["state"] = "idle";
   private elapsedInPlay = 0;
 
   private bossHpBarBg!: Phaser.GameObjects.Rectangle;
   private bossHpBarFill!: Phaser.GameObjects.Rectangle;
   private bossHpText!: Phaser.GameObjects.Text;
-  private livesText!: Phaser.GameObjects.Text;
+  private lifeIconImages: Phaser.GameObjects.Image[] = [];
   private timerText!: Phaser.GameObjects.Text;
   private countdownText!: Phaser.GameObjects.Text;
-  private resultText!: Phaser.GameObjects.Text;
 
   private onStatusChange?: OnGameStatusChange;
 
@@ -50,141 +53,156 @@ export class MainScene extends Phaser.Scene {
   }
 
   preload() {
-    this.load.image("player", ASSET_PATHS.player);
-    this.load.image("lose-popup", ASSET_PATHS.losePopup);
-    this.load.image("boss", ASSET_PATHS.boss);
-    this.load.image("turret", ASSET_PATHS.turret);
-    this.load.image("boss-bullet", ASSET_PATHS.bossBullet);
+    this.load.image("play-bg", ASSET_PATHS.playBg);
+
+    this.load.image("stapi-act-1", ASSET_PATHS.stapiAct1);
+    this.load.image("stapi-act-2", ASSET_PATHS.stapiAct2);
+    this.load.image("stapi-act-3", ASSET_PATHS.stapiAct3);
+    this.load.image("stapi-act-4", ASSET_PATHS.stapiAct4);
     this.load.image("player-bullet", ASSET_PATHS.playerBullet);
+
+    this.load.image("turret-1", ASSET_PATHS.turret1);
+    this.load.image("turret-2", ASSET_PATHS.turret2);
+    this.load.image("turret-3", ASSET_PATHS.turret3);
+    this.load.image("turret-4", ASSET_PATHS.turret4);
+    this.load.image("boss-bullet-1", ASSET_PATHS.bullet1);
+    this.load.image("boss-bullet-2", ASSET_PATHS.bullet2);
+    this.load.image("boss-bullet-3", ASSET_PATHS.bullet3);
+    this.load.image("boss-bullet-4", ASSET_PATHS.bullet4);
+
+    this.load.image("boss-alive", ASSET_PATHS.bossAlive);
+    this.load.image("boss-dead", ASSET_PATHS.bossDead);
+
+    this.load.image("defeated-popup", ASSET_PATHS.defeatedPopup);
+    this.load.image("win-popup", ASSET_PATHS.winPopup);
+    this.load.image("live-icon", ASSET_PATHS.liveIcon);
   }
 
   create() {
-    this.add.rectangle(
-      GAME_WIDTH / 2,
-      GAME_HEIGHT / 2,
-      GAME_WIDTH,
-      GAME_HEIGHT,
-      0x050816,
-    );
-
-    this.add
-      .rectangle(
-        GAME_WIDTH / 2,
-        GAME_HEIGHT / 2,
-        GAME_WIDTH - 48,
-        GAME_HEIGHT - 48,
-        0x0b1020,
-      )
-      .setStrokeStyle(2, 0x1e293b);
-
-
-    const midY = GAME_HEIGHT / 2;
-    this.add
-      .rectangle(GAME_WIDTH / 2, midY, GAME_WIDTH - 64, 4, 0x1e293b)
-      .setAlpha(0.8);
+    const bg = this.add.image(GAME_WIDTH / 2, GAME_HEIGHT / 2, "play-bg");
+    bg.setDisplaySize(GAME_WIDTH, GAME_HEIGHT);
 
     this.boss = this.physics.add
-      .sprite(GAME_WIDTH / 2, 110, "boss")
-      .setDisplaySize(120, 80)
+      .sprite(GAME_WIDTH / 2, GAME_LAYOUT.boss.y, "boss-alive")
+      .setDisplaySize(
+        GAME_LAYOUT.boss.displayWidth,
+        GAME_LAYOUT.boss.displayHeight,
+      )
       .setCollideWorldBounds(true);
 
     this.player = this.physics.add
-      .sprite(GAME_WIDTH / 2, GAME_HEIGHT - 80, "player")
-      .setDisplaySize(80, 80)
+      .sprite(
+        GAME_WIDTH / 2,
+        GAME_HEIGHT - GAME_LAYOUT.player.marginBottom,
+        "stapi-act-1",
+      )
+      .setDisplaySize(
+        GAME_LAYOUT.player.displaySize,
+        GAME_LAYOUT.player.displaySize,
+      )
       .setCollideWorldBounds(true);
 
-    this.player.setMaxVelocity(600, 0);
+    this.player.setMaxVelocity(GAME_LAYOUT.player.maxVelocityX, 0);
     this.player.setImmovable(true);
 
     this.turrets = [];
-    const turretCount = 3;
-    const marginX = 120;
+    const turretCount = GAME_LAYOUT.turrets.count;
+    const marginX = GAME_LAYOUT.turrets.marginX;
     const spacing =
       (GAME_WIDTH - marginX * 2) / (turretCount > 1 ? turretCount - 1 : 1);
 
     for (let i = 0; i < turretCount; i += 1) {
       const x = marginX + spacing * i;
-      const turret = this.add
-        .image(x, 170, "turret")
-        .setDisplaySize(72, 48)
-        .setTint(0x38bdf8);
-      this.turrets.push(turret);
+      const turretKey = `turret-${i + 1}`;
+      const bulletKey = `boss-bullet-${i + 1}`;
+      const turretSprite = this.add
+        .image(x, GAME_LAYOUT.turrets.y, turretKey)
+        .setDisplaySize(
+          GAME_LAYOUT.turrets.displayWidth,
+          GAME_LAYOUT.turrets.displayHeight,
+        );
+      this.turrets.push({ sprite: turretSprite, bulletKey });
     }
 
     this.bullets = this.physics.add.group({
       classType: Phaser.Physics.Arcade.Sprite,
-      maxSize: 80,
+      maxSize: GAME_LAYOUT.bulletPoolMax,
       runChildUpdate: false,
     });
 
+    const hpBar = GAME_LAYOUT.bossHpBar;
     this.bossHpBarBg = this.add.rectangle(
       GAME_WIDTH / 2,
-      64,
-      360,
-      18,
-      0x020617,
+      hpBar.centerY,
+      hpBar.width,
+      hpBar.height,
+      hpBar.bgColor,
     );
-    this.bossHpBarBg.setStrokeStyle(2, 0x4b5563);
+    this.bossHpBarBg.setStrokeStyle(hpBar.strokeWidth, hpBar.strokeColor);
 
     this.bossHpBarFill = this.add.rectangle(
-      this.bossHpBarBg.x - this.bossHpBarBg.width / 2 + 2,
+      this.bossHpBarBg.x - this.bossHpBarBg.width / 2 + hpBar.innerPad,
       this.bossHpBarBg.y,
-      this.bossHpBarBg.width - 4,
-      this.bossHpBarBg.height - 4,
-      0x22c55e,
+      this.bossHpBarBg.width - hpBar.innerPad * 2,
+      this.bossHpBarBg.height - hpBar.innerPad * 2,
+      hpBar.fillHigh,
     );
     this.bossHpBarFill.setOrigin(0, 0.5);
 
     this.bossHpText = this.add.text(
-      this.bossHpBarBg.x + this.bossHpBarBg.width / 2 + 8,
+      this.bossHpBarBg.x + this.bossHpBarBg.width / 2 + hpBar.textOffsetX,
       this.bossHpBarBg.y,
       "",
       {
-        fontSize: "16px",
-        color: "#e5e7eb",
-        fontFamily: "system-ui, sans-serif",
+        fontSize: HUD_STYLE.bossHpFontSize,
+        fontStyle: "bold",
+        color: HUD_STYLE.accentColor,
+        fontFamily: HUD_STYLE.fontFamily,
       },
     );
     this.bossHpText.setOrigin(0, 0.5);
 
-    this.livesText = this.add.text(32, GAME_HEIGHT - 50, "", {
-      fontSize: "20px",
-      color: "#fbbf24",
-      fontFamily: "system-ui, sans-serif",
-    });
+    const li = GAME_LAYOUT.lifeIcons;
+    const lifeY = GAME_HEIGHT - li.marginBottom;
+    this.lifeIconImages = [];
+    for (let i = 0; i < GAME_CONSTANTS.playerLives; i += 1) {
+      const x = li.marginLeft + li.width / 2 + i * (li.width + li.gap);
+      const img = this.add
+        .image(x, lifeY, "live-icon")
+        .setDisplaySize(li.width, li.height)
+        .setOrigin(0.5, 0.5);
+      this.lifeIconImages.push(img);
+    }
 
-    this.timerText = this.add.text(GAME_WIDTH - 32, GAME_HEIGHT - 40, "", {
-      fontSize: "20px",
-      color: "#e5e7eb",
-      fontFamily: "system-ui, sans-serif",
-    });
-    this.timerText.setOrigin(1, 0.5);
-
-    this.countdownText = this.add.text(
-      GAME_WIDTH / 2,
-      GAME_HEIGHT / 2,
+    const tm = GAME_LAYOUT.timer;
+    this.timerText = this.add.text(
+      GAME_WIDTH - tm.marginRight,
+      GAME_HEIGHT - tm.marginBottom,
       "",
       {
-        fontSize: "56px",
-        color: "#e5e7eb",
-        fontFamily: "system-ui, sans-serif",
+        fontSize: HUD_STYLE.timerFontSize,
+        fontStyle: "bold",
+        color: HUD_STYLE.accentColor,
+        fontFamily: HUD_STYLE.fontFamily,
       },
     );
-    this.countdownText.setOrigin(0.5, 0.5);
+    this.timerText.setOrigin(1, 0.5);
 
-    this.resultText = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT / 2 + 80, "", {
-      fontSize: "28px",
-      color: "#e5e7eb",
-      fontFamily: "system-ui, sans-serif",
-      align: "center",
-      wordWrap: { width: 540 },
+    this.countdownText = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT / 2, "", {
+      fontSize: HUD_STYLE.countdownFontSize,
+      fontStyle: "bold",
+      color: HUD_STYLE.accentColor,
+      fontFamily: HUD_STYLE.fontFamily,
     });
-    this.resultText.setOrigin(0.5, 0.5);
+    this.countdownText
+      .setOrigin(0.5, 0.5)
+      .setDepth(GAME_LAYOUT.countdown.depth);
 
     this.physics.add.overlap(
       this.bullets,
       this.boss,
-      this.handleBulletHitsBoss as Phaser.Types.Physics.Arcade.ArcadePhysicsCallback,
+      this
+        .handleBulletHitsBoss as Phaser.Types.Physics.Arcade.ArcadePhysicsCallback,
       undefined,
       this,
     );
@@ -192,7 +210,8 @@ export class MainScene extends Phaser.Scene {
     this.physics.add.overlap(
       this.bullets,
       this.player,
-      this.handleBulletHitsPlayer as Phaser.Types.Physics.Arcade.ArcadePhysicsCallback,
+      this
+        .handleBulletHitsPlayer as Phaser.Types.Physics.Arcade.ArcadePhysicsCallback,
       undefined,
       this,
     );
@@ -201,7 +220,8 @@ export class MainScene extends Phaser.Scene {
       if (this.gameState !== "playing" && this.gameState !== "countdown") {
         return;
       }
-      const clampedX = Phaser.Math.Clamp(pointer.x, 64, GAME_WIDTH - 64);
+      const m = GAME_LAYOUT.player.pointerClampMargin;
+      const clampedX = Phaser.Math.Clamp(pointer.x, m, GAME_WIDTH - m);
       this.player.setX(clampedX);
     });
 
@@ -209,6 +229,62 @@ export class MainScene extends Phaser.Scene {
       if (pointer.leftButtonDown()) {
         this.tryShootPlayerBullet();
       }
+    });
+
+    // Default = pi-act-1 (idle). Only play action sequence on shooting.
+    this.player.setTexture("stapi-act-1");
+
+    if (!this.anims.exists("stapi-shoot")) {
+      this.anims.create({
+        key: "stapi-shoot",
+        frames: [
+          { key: "stapi-act-1" },
+          { key: "stapi-act-2" },
+          { key: "stapi-act-3" },
+          { key: "stapi-act-4" },
+        ],
+        frameRate: GAME_LAYOUT.playerShootAnim.frameRate,
+        repeat: 0,
+      });
+    }
+
+    this.player.on(
+      "animationupdate-stapi-shoot",
+      (
+        _anim: Phaser.Animations.Animation,
+        frame: Phaser.Animations.AnimationFrame,
+      ) => {
+        if (this.gameState !== "playing") return;
+        if (this.playerShotFiredThisAnim) return;
+        const isShootFrame =
+          frame.textureKey === "stapi-act-4" || frame.index >= 4;
+        if (!isShootFrame) return;
+
+        this.playerShotFiredThisAnim = true;
+        const bullet = this.spawnBullet(
+          this.player.x,
+          this.player.y - GAME_LAYOUT.player.bulletSpawnOffsetY,
+          "player",
+        );
+        if (!bullet) return;
+        bullet.setVelocity(0, -GAME_CONSTANTS.playerBulletSpeed);
+      },
+    );
+
+    this.player.on("animationcomplete-stapi-shoot", () => {
+      if (this.gameState === "playing" && !this.playerShotFiredThisAnim) {
+        const bullet = this.spawnBullet(
+          this.player.x,
+          this.player.y - GAME_LAYOUT.player.bulletSpawnOffsetY,
+          "player",
+        );
+        if (bullet) {
+          bullet.setVelocity(0, -GAME_CONSTANTS.playerBulletSpeed);
+        }
+      }
+      this.isPlayerShooting = false;
+      this.playerShotFiredThisAnim = false;
+      this.player.setTexture("stapi-act-1");
     });
 
     this.startCountdown();
@@ -227,16 +303,17 @@ export class MainScene extends Phaser.Scene {
     let remaining = GAME_CONSTANTS.preGameCountdown;
     this.countdownText.setText(remaining.toString());
 
+    const pre = GAME_LAYOUT.preGame;
     this.time.addEvent({
-      delay: 1000,
-      repeat: remaining,
+      delay: pre.tickIntervalMs,
+      repeat: Math.max(0, remaining - 1),
       callback: () => {
         remaining -= 1;
         if (remaining > 0) {
           this.countdownText.setText(remaining.toString());
         } else {
           this.countdownText.setText("GO!");
-          this.time.delayedCall(500, () => {
+          this.time.delayedCall(pre.goClearDelayMs, () => {
             this.countdownText.setText("");
           });
           this.gameState = "playing";
@@ -247,27 +324,29 @@ export class MainScene extends Phaser.Scene {
   }
 
   private updateHud() {
+    const hpBar = GAME_LAYOUT.bossHpBar;
+    const innerW = this.bossHpBarBg.width - hpBar.innerPad * 2;
     const hpRatio = Phaser.Math.Clamp(
       this.bossHp / GAME_CONSTANTS.initialBossHp,
       0,
       1,
     );
-    this.bossHpBarFill.width =
-      (this.bossHpBarBg.width - 4) * (hpRatio > 0 ? hpRatio : 0.00001);
+    this.bossHpBarFill.width = innerW * (hpRatio > 0 ? hpRatio : 0.00001);
 
-    if (hpRatio > 0.6) {
-      this.bossHpBarFill.setFillStyle(0x22c55e);
-    } else if (hpRatio > 0.3) {
-      this.bossHpBarFill.setFillStyle(0xfacc15);
+    if (hpRatio > hpBar.ratioHigh) {
+      this.bossHpBarFill.setFillStyle(hpBar.fillHigh);
+    } else if (hpRatio > hpBar.ratioMid) {
+      this.bossHpBarFill.setFillStyle(hpBar.fillMid);
     } else {
-      this.bossHpBarFill.setFillStyle(0xef4444);
+      this.bossHpBarFill.setFillStyle(hpBar.fillLow);
     }
 
     const hpPercent = Math.round(hpRatio * 100);
     this.bossHpText.setText(`${hpPercent}%`);
 
-    const hearts = GAME_CONSTANTS.lifeIcon.repeat(this.playerLives);
-    this.livesText.setText(`Lives: ${hearts}`);
+    for (let i = 0; i < this.lifeIconImages.length; i += 1) {
+      this.lifeIconImages[i].setVisible(i < this.playerLives);
+    }
 
     this.timerText.setText(`Time: ${Math.ceil(this.timeLeft)}s`);
   }
@@ -292,22 +371,10 @@ export class MainScene extends Phaser.Scene {
     }
     this.lastPlayerShotAt = now;
 
-    const bullet = this.spawnBullet(
-      this.player.x,
-      this.player.y - 40,
-      "player",
-    );
-    if (!bullet) return;
-    bullet.setVelocity(0, -GAME_CONSTANTS.playerBulletSpeed);
-
-    this.tweens.add({
-      targets: this.player,
-      scaleX: 0.9,
-      scaleY: 0.9,
-      yoyo: true,
-      duration: 100,
-      ease: "Sine.easeInOut",
-    });
+    if (this.isPlayerShooting) return;
+    this.isPlayerShooting = true;
+    this.playerShotFiredThisAnim = false;
+    this.player.play("stapi-shoot");
   }
 
   private spawnBullet(
@@ -315,7 +382,7 @@ export class MainScene extends Phaser.Scene {
     y: number,
     kind: BulletType,
   ): Bullet | undefined {
-    const textureKey = kind === "player" ? "player-bullet" : "boss-bullet";
+    const textureKey = kind === "player" ? "player-bullet" : "boss-bullet-1";
 
     const bullet = this.bullets.get(x, y, textureKey) as Bullet | null;
     if (!bullet) return undefined;
@@ -328,20 +395,30 @@ export class MainScene extends Phaser.Scene {
         ? GAME_CONSTANTS.playerBulletRadius
         : GAME_CONSTANTS.bossBulletRadius,
     );
-    bullet.setDisplaySize(24, 24);
-
+    const bs = GAME_LAYOUT.bulletDisplaySize;
+    bullet.setDisplaySize(bs, bs);
 
     return bullet;
   }
 
-  private spawnBossBulletFrom(turret: Phaser.GameObjects.Image) {
+  private spawnBossBulletFrom(turret: {
+    sprite: Phaser.GameObjects.Image;
+    bulletKey: string;
+  }) {
     if (this.gameState !== "playing") return;
 
-    const bullet = this.spawnBullet(turret.x, turret.y + 24, "boss");
+    const bullet = this.spawnBullet(
+      turret.sprite.x,
+      turret.sprite.y + GAME_LAYOUT.turrets.bulletSpawnOffsetY,
+      "boss",
+    );
     if (!bullet) return;
+    bullet.setTexture(turret.bulletKey);
 
-    // random shooting angle between -25° and 25°
-    const randomAngleDeg = Phaser.Math.Between(-25, 25);
+    const randomAngleDeg = Phaser.Math.Between(
+      -GAME_CONSTANTS.bossBulletAngleRandomDeg,
+      GAME_CONSTANTS.bossBulletAngleRandomDeg,
+    );
     const angleRad = Phaser.Math.DegToRad(randomAngleDeg);
     const speed = GAME_CONSTANTS.bossBulletSpeed;
     const vx = Math.sin(angleRad) * speed;
@@ -394,26 +471,28 @@ export class MainScene extends Phaser.Scene {
   }
 
   private flashBoss() {
-    this.cameras.main.flash(120, 255, 255, 255, false);
+    const f = GAME_LAYOUT.flash;
+    this.cameras.main.flash(f.bossCameraMs, 255, 255, 255, false);
 
     this.tweens.add({
       targets: this.boss,
       tint: 0xffffff,
-      scaleX: 1.15,
-      scaleY: 1.15,
-      duration: 100,
+      scaleX: f.bossHitScale,
+      scaleY: f.bossHitScale,
+      duration: f.bossTweenMs,
       yoyo: true,
-      repeat: 1,
+      repeat: f.bossTweenRepeat,
     });
   }
 
   private flashPlayer() {
+    const f = GAME_LAYOUT.flash;
     this.tweens.add({
       targets: this.player,
-      alpha: 0.2,
-      duration: 80,
+      alpha: f.playerAlpha,
+      duration: f.playerTweenMs,
       yoyo: true,
-      repeat: 4,
+      repeat: f.playerTweenRepeat,
       onComplete: () => {
         this.player.setAlpha(1);
       },
@@ -426,15 +505,37 @@ export class MainScene extends Phaser.Scene {
     this.updateHud();
     this.emitStatus();
 
-    this.resultText.setText("You're Win! StaPi defeated the Bug Boss!");
+    this.boss.setTexture("boss-dead");
+    this.boss.setVelocityX(0);
+    this.player.setVelocityX(0);
+    this.bullets.clear(true, true);
+    this.input.enabled = false;
+    this.physics.pause();
+
+    const end = GAME_LAYOUT.endScreen;
+    const overlay = this.add
+      .rectangle(
+        GAME_WIDTH / 2,
+        GAME_HEIGHT / 2,
+        GAME_WIDTH,
+        GAME_HEIGHT,
+        0x000000,
+        end.overlayAlpha,
+      )
+      .setDepth(end.overlayDepth);
+
+    const popup = this.add
+      .image(GAME_WIDTH / 2, GAME_HEIGHT / 2, "win-popup")
+      .setDisplaySize(GAME_WIDTH * end.popupScale, GAME_HEIGHT * end.popupScale)
+      .setDepth(end.popupDepth);
 
     this.tweens.add({
-      targets: this.boss,
-      scaleX: 0,
-      scaleY: 0,
-      angle: 360,
-      duration: 600,
-      ease: "Back.easeIn",
+      targets: [overlay, popup],
+      alpha: { from: 0, to: 1 },
+      scaleX: { from: 0.9, to: 1 },
+      scaleY: { from: 0.9, to: 1 },
+      duration: end.tweenDurationMs,
+      ease: "Back.easeOut",
     });
   }
 
@@ -443,7 +544,13 @@ export class MainScene extends Phaser.Scene {
     this.gameState = reason;
     this.updateHud();
     this.emitStatus();
+    this.player.setVelocityX(0);
+    this.boss.setVelocityX(0);
+    this.bullets.clear(true, true);
+    this.input.enabled = false;
+    this.physics.pause();
 
+    const end = GAME_LAYOUT.endScreen;
     const overlay = this.add
       .rectangle(
         GAME_WIDTH / 2,
@@ -451,25 +558,23 @@ export class MainScene extends Phaser.Scene {
         GAME_WIDTH,
         GAME_HEIGHT,
         0x000000,
-        0.7,
+        end.overlayAlpha,
       )
-      .setDepth(5);
- 
+      .setDepth(end.overlayDepth);
+
     const popup = this.add
-      .image(GAME_WIDTH / 2, GAME_HEIGHT / 2, "lose-popup")
-      .setDisplaySize(GAME_WIDTH * 0.8, GAME_HEIGHT * 0.8)
-      .setDepth(6);
+      .image(GAME_WIDTH / 2, GAME_HEIGHT / 2, "defeated-popup")
+      .setDisplaySize(GAME_WIDTH * end.popupScale, GAME_HEIGHT * end.popupScale)
+      .setDepth(end.popupDepth);
 
     this.tweens.add({
       targets: [overlay, popup],
       alpha: { from: 0, to: 1 },
       scaleX: { from: 0.9, to: 1 },
       scaleY: { from: 0.9, to: 1 },
-      duration: 400,
+      duration: end.tweenDurationMs,
       ease: "Back.easeOut",
     });
-
-    
   }
 
   update(time: number, deltaMs: number) {
@@ -489,14 +594,15 @@ export class MainScene extends Phaser.Scene {
       }
     }
 
+    const cull = GAME_LAYOUT.bulletCullMargin;
     this.bullets.children.each((child) => {
       const bullet = child as Bullet;
       if (!bullet.active) return false;
       if (
-        bullet.y < -20 ||
-        bullet.y > GAME_HEIGHT + 20 ||
-        bullet.x < -20 ||
-        bullet.x > GAME_WIDTH + 20
+        bullet.y < -cull ||
+        bullet.y > GAME_HEIGHT + cull ||
+        bullet.x < -cull ||
+        bullet.x > GAME_WIDTH + cull
       ) {
         bullet.destroy();
       }
@@ -504,7 +610,7 @@ export class MainScene extends Phaser.Scene {
     });
 
     this.player.setVelocityX(0);
-    this.player.y = GAME_HEIGHT - 80;
+    this.player.y = GAME_HEIGHT - GAME_LAYOUT.player.marginBottom;
   }
 
   private bossTargetX: number | null = null;
@@ -522,11 +628,16 @@ export class MainScene extends Phaser.Scene {
 
     // decrease cooldown, when it's 0, choose a new target X
     this.bossRetargetCooldown -= deltaSec;
+    const bm = GAME_LAYOUT.bossMove;
     if (this.bossRetargetCooldown <= 0 || this.bossTargetX === null) {
-      // Boss only moves in the range [80, GAME_WIDTH - 80]
-      this.bossTargetX = Phaser.Math.Between(80, GAME_WIDTH - 80);
-      // time to the next direction change (0.6–1.4s, faster with mult)
-      const base = Phaser.Math.FloatBetween(0.6, 1.4);
+      this.bossTargetX = Phaser.Math.Between(
+        bm.horizontalMargin,
+        GAME_WIDTH - bm.horizontalMargin,
+      );
+      const base = Phaser.Math.FloatBetween(
+        bm.retargetSecondsMin,
+        bm.retargetSecondsMax,
+      );
       this.bossRetargetCooldown = base / mult;
     }
 
@@ -534,8 +645,7 @@ export class MainScene extends Phaser.Scene {
     const dir = Math.sign(dx) || Phaser.Math.RND.sign();
     this.boss.setVelocityX(dir * speed);
 
-    // if Boss is near targetX (error < 10px) then force choose a new target sooner
-    if (Math.abs(dx) < 10) {
+    if (Math.abs(dx) < bm.arrivedThresholdPx) {
       this.bossRetargetCooldown = 0;
     }
   }
@@ -555,7 +665,7 @@ export class MainScene extends Phaser.Scene {
       elapsedRatio,
     );
     const baseInterval = GAME_CONSTANTS.bossBaseFireRate;
-    const minDelay = 0.4;
+    const minDelay = GAME_LAYOUT.turretFire.minIntervalSec;
     const delaySec = Math.max(baseInterval / 1000 / fireMult, minDelay);
 
     this.turretCooldown = delaySec;
@@ -568,4 +678,3 @@ export class MainScene extends Phaser.Scene {
     }
   }
 }
-

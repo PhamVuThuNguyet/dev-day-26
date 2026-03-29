@@ -1,9 +1,9 @@
-'use client';
+"use client";
 
-import { useEffect, useRef } from 'react';
-import Phaser from 'phaser';
-import { MainScene, type OnGameStatusChange } from './MainScene';
-import { GAME_HEIGHT, GAME_WIDTH } from './config';
+import { useEffect, useRef } from "react";
+import Phaser from "phaser";
+import { MainScene, type OnGameStatusChange } from "./MainScene";
+import { GAME_HEIGHT, GAME_WIDTH } from "./config";
 
 interface Props {
   onStatusChange?: OnGameStatusChange;
@@ -25,10 +25,10 @@ export default function PhaserGame({ onStatusChange }: Props) {
       type: Phaser.AUTO,
       width: GAME_WIDTH,
       height: GAME_HEIGHT,
-      backgroundColor: '#020617',
+      backgroundColor: "#020617",
       parent: containerRef.current,
       physics: {
-        default: 'arcade',
+        default: "arcade",
         arcade: {
           gravity: { x: 0, y: 0 },
           debug: false,
@@ -44,9 +44,10 @@ export default function PhaserGame({ onStatusChange }: Props) {
     const game = new Phaser.Game(config);
     gameRef.current = game;
 
-    game.scene.start('MainScene', {
-      onStatusChange: (status: Parameters<NonNullable<OnGameStatusChange>>[0]) =>
-        statusChangeRef.current?.(status),
+    game.scene.start("MainScene", {
+      onStatusChange: (
+        status: Parameters<NonNullable<OnGameStatusChange>>[0],
+      ) => statusChangeRef.current?.(status),
     });
 
     return () => {
@@ -57,4 +58,3 @@ export default function PhaserGame({ onStatusChange }: Props) {
 
   return <div ref={containerRef} className="w-full h-full" />;
 }
-
